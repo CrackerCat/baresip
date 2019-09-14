@@ -662,10 +662,8 @@ int avcodec_decode_h265(struct viddec_state *vds, struct vidframe *frame,
 		       bool *intra, bool marker, uint16_t seq, struct mbuf *mb)
 {
 	static const uint8_t nal_seq[3] = {0, 0, 1};
-	int err, ret, got_picture, i;
 	struct h265_nal hdr;
-	AVPacket avpkt;
-	enum vidfmt fmt;
+	int err;
 
 	if (!vds || !frame || !intra || !mb)
 		return EINVAL;
@@ -762,6 +760,11 @@ int avcodec_decode_h265(struct viddec_state *vds, struct vidframe *frame,
 		return EPROTO;
 	}
 
+	if (*intra) {
+		vds->got_keyframe = true;
+		++vds->stats.n_key;
+	}
+
 	if (!marker) {
 
 		if (vds->mb->end > DECODE_MAXSZ) {
@@ -778,68 +781,9 @@ int avcodec_decode_h265(struct viddec_state *vds, struct vidframe *frame,
 		goto out;
 	}
 
-
-	/* todo: use ffdecode */
-
-	av_init_packet(&avpkt);
-	avpkt.data = vds->mb->buf;
-	avpkt.size = (int)vds->mb->end;
-
-#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(57, 37, 100)
-
-	ret = avcodec_send_packet(vds->ctx, &avpkt);
-	if (ret < 0) {
-		err = EBADMSG;
+	err = ffdecode(vds, frame);
+	if (err)
 		goto out;
-	}
-
-	ret = avcodec_receive_frame(vds->ctx, vds->pict);
-	if (ret < 0) {
-		err = EBADMSG;
-		goto out;
-	}
-
-	got_picture = true;
-
-#else
-	ret = avcodec_decode_video2(vds->ctx, vds->pict, &got_picture, &avpkt);
-	if (ret < 0) {
-		debug("h265: decode error\n");
-		err = EPROTO;
-		goto out;
-	}
-#endif
-
-	if (!got_picture) {
-		/* debug("h265: no picture\n"); */
-		goto out;
-	}
-
-	switch (vds->pict->format) {
-
-	case AV_PIX_FMT_YUV420P:
-		fmt = VID_FMT_YUV420P;
-		break;
-
-	case AV_PIX_FMT_YUV444P:
-		fmt = VID_FMT_YUV444P;
-		break;
-
-	default:
-		warning("h265: decode: bad pixel format (%i) (%s)\n",
-			vds->pict->format,
-			av_get_pix_fmt_name(vds->pict->format));
-		goto out;
-	}
-
-	for (i=0; i<4; i++) {
-		frame->data[i]     = vds->pict->data[i];
-		frame->linesize[i] = vds->pict->linesize[i];
-	}
-
-	frame->size.w = vds->ctx->width;
-	frame->size.h = vds->ctx->height;
-	frame->fmt    = fmt;
 
  out:
 	mbuf_rewind(vds->mb);
