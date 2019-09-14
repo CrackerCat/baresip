@@ -628,3 +628,222 @@ int avcodec_decode_h263(struct viddec_state *st, struct vidframe *frame,
 
 	return err;
 }
+
+
+enum {
+	H265_FU_HDR_SIZE = 1
+};
+
+struct h265_fu {
+	unsigned s:1;
+	unsigned e:1;
+	unsigned type:6;
+};
+
+
+static inline int h265_fu_decode(struct h265_fu *fu, struct mbuf *mb)
+{
+	uint8_t v;
+
+	if (mbuf_get_left(mb) < 1)
+		return EBADMSG;
+
+	v = mbuf_read_u8(mb);
+
+	fu->s    = v>>7 & 0x1;
+	fu->e    = v>>6 & 0x1;
+	fu->type = v>>0 & 0x3f;
+
+	return 0;
+}
+
+
+int avcodec_decode_h265(struct viddec_state *vds, struct vidframe *frame,
+		       bool *intra, bool marker, uint16_t seq, struct mbuf *mb)
+{
+	static const uint8_t nal_seq[3] = {0, 0, 1};
+	int err, ret, got_picture, i;
+	struct h265_nal hdr;
+	AVPacket avpkt;
+	enum vidfmt fmt;
+
+	if (!vds || !frame || !intra || !mb)
+		return EINVAL;
+
+	*intra = false;
+
+	err = h265_nal_decode(&hdr, mbuf_buf(mb));
+	if (err)
+		return err;
+
+	mbuf_advance(mb, H265_HDR_SIZE);
+
+#if 0
+	debug("h265: decode: %s type=%2d  %s\n",
+		  h265_is_keyframe(hdr.nal_unit_type) ? "<KEY>" : "     ",
+		  hdr.nal_unit_type,
+		  h265_nalunit_name(hdr.nal_unit_type));
+#endif
+
+	if (vds->frag && hdr.nal_unit_type != H265_NAL_FU) {
+		debug("h265: lost fragments; discarding previous NAL\n");
+		fragment_rewind(vds);
+		vds->frag = false;
+	}
+
+	/* handle NAL types */
+	if (0 <= hdr.nal_unit_type && hdr.nal_unit_type <= 40) {
+
+		if (h265_is_keyframe(hdr.nal_unit_type))
+			*intra = true;
+
+		mb->pos -= H265_HDR_SIZE;
+
+		err  = mbuf_write_mem(vds->mb, nal_seq, 3);
+		err |= mbuf_write_mem(vds->mb, mbuf_buf(mb),mbuf_get_left(mb));
+		if (err)
+			goto out;
+	}
+	else if (H265_NAL_FU == hdr.nal_unit_type) {
+
+		struct h265_fu fu;
+
+		err = h265_fu_decode(&fu, mb);
+		if (err)
+			return err;
+
+		if (fu.s) {
+			if (h265_is_keyframe(fu.type))
+				*intra = true;
+
+			if (vds->frag) {
+				debug("h265: lost fragments; ignoring NAL\n");
+				fragment_rewind(vds);
+			}
+
+			vds->frag_start = vds->mb->pos;
+			vds->frag = true;
+
+			hdr.nal_unit_type = fu.type;
+
+			err  = mbuf_write_mem(vds->mb, nal_seq, 3);
+			err = h265_nal_encode_mbuf(vds->mb, &hdr);
+			if (err)
+				goto out;
+		}
+		else {
+			if (!vds->frag) {
+				debug("h265: ignoring fragment\n");
+				return 0;
+			}
+
+			if (seq_diff(vds->frag_seq, seq) != 1) {
+				debug("h265: lost fragments detected\n");
+				fragment_rewind(vds);
+				vds->frag = false;
+				return 0;
+			}
+		}
+
+		err = mbuf_write_mem(vds->mb, mbuf_buf(mb), mbuf_get_left(mb));
+		if (err)
+			goto out;
+
+		if (fu.e)
+			vds->frag = false;
+
+		vds->frag_seq = seq;
+	}
+	else {
+		warning("h265: unknown NAL type %u (%s) [%zu bytes]\n",
+			hdr.nal_unit_type,
+			h265_nalunit_name(hdr.nal_unit_type),
+			mbuf_get_left(mb));
+		return EPROTO;
+	}
+
+	if (!marker) {
+
+		if (vds->mb->end > DECODE_MAXSZ) {
+			warning("h265: decode buffer size exceeded\n");
+			err = ENOMEM;
+			goto out;
+		}
+
+		return 0;
+	}
+
+	if (vds->frag) {
+		err = EPROTO;
+		goto out;
+	}
+
+
+	/* todo: use ffdecode */
+
+	av_init_packet(&avpkt);
+	avpkt.data = vds->mb->buf;
+	avpkt.size = (int)vds->mb->end;
+
+#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(57, 37, 100)
+
+	ret = avcodec_send_packet(vds->ctx, &avpkt);
+	if (ret < 0) {
+		err = EBADMSG;
+		goto out;
+	}
+
+	ret = avcodec_receive_frame(vds->ctx, vds->pict);
+	if (ret < 0) {
+		err = EBADMSG;
+		goto out;
+	}
+
+	got_picture = true;
+
+#else
+	ret = avcodec_decode_video2(vds->ctx, vds->pict, &got_picture, &avpkt);
+	if (ret < 0) {
+		debug("h265: decode error\n");
+		err = EPROTO;
+		goto out;
+	}
+#endif
+
+	if (!got_picture) {
+		/* debug("h265: no picture\n"); */
+		goto out;
+	}
+
+	switch (vds->pict->format) {
+
+	case AV_PIX_FMT_YUV420P:
+		fmt = VID_FMT_YUV420P;
+		break;
+
+	case AV_PIX_FMT_YUV444P:
+		fmt = VID_FMT_YUV444P;
+		break;
+
+	default:
+		warning("h265: decode: bad pixel format (%i) (%s)\n",
+			vds->pict->format,
+			av_get_pix_fmt_name(vds->pict->format));
+		goto out;
+	}
+
+	for (i=0; i<4; i++) {
+		frame->data[i]     = vds->pict->data[i];
+		frame->linesize[i] = vds->pict->linesize[i];
+	}
+
+	frame->size.w = vds->ctx->width;
+	frame->size.h = vds->ctx->height;
+	frame->fmt    = fmt;
+
+ out:
+	mbuf_rewind(vds->mb);
+	vds->frag = false;
+
+	return err;
+}

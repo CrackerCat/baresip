@@ -59,6 +59,8 @@ int avcodec_resolve_codecid(const char *s)
 		return AV_CODEC_ID_H264;
 	else if (0 == str_casecmp(s, "MP4V-ES"))
 		return AV_CODEC_ID_MPEG4;
+	else if (0 == str_casecmp(s, "H265"))
+		return AV_CODEC_ID_H265;
 	else
 		return AV_CODEC_ID_NONE;
 }
@@ -166,6 +168,15 @@ static struct vidcodec mpg4 = {
 	NULL,
 };
 
+static struct vidcodec h265 = {
+	.name      = "H265",
+	.fmtp      = "profile-id=1",
+	.encupdh   = avcodec_encode_update,
+	.ench      = avcodec_encode,
+	.decupdh   = avcodec_decode_update,
+	.dech      = avcodec_decode_h265,
+};
+
 
 static int module_init(void)
 {
@@ -207,6 +218,9 @@ static int module_init(void)
 
 	if (avcodec_find_decoder(AV_CODEC_ID_MPEG4))
 		vidcodec_register(vidcodecl, &mpg4);
+
+	if (avcodec_find_decoder(AV_CODEC_ID_H265))
+		vidcodec_register(vidcodecl, &h265);
 
 	if (avcodec_h264enc) {
 		info("avcodec: using H.264 encoder '%s' -- %s\n",
@@ -280,6 +294,7 @@ static int module_init(void)
 
 static int module_close(void)
 {
+	vidcodec_unregister(&h265);
 	vidcodec_unregister(&mpg4);
 	vidcodec_unregister(&h263);
 	vidcodec_unregister(&h264);
