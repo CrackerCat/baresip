@@ -98,13 +98,6 @@ void h263_hdr_copy_strm(struct h263_hdr *hdr, const struct h263_strm *s);
 
 
 /*
- * H.264
- */
-
-int h264_decode_sprop_params(AVCodecContext *codec, struct pl *pl);
-
-
-/*
  * H.265 format
  */
 enum {
@@ -142,10 +135,6 @@ struct h265_nal {
 	unsigned nal_unit_type:6;          /* NAL unit type (0-40)       */
 	unsigned nuh_temporal_id_plus1:3;  /* temporal identifier plus 1 */
 };
-
-
-//extern AVCodec *h265_encoder;
-//extern AVCodec *h265_decoder;
 
 
 void h265_nal_encode(uint8_t buf[2], unsigned nal_unit_type,
