@@ -42,6 +42,8 @@
 static const uint8_t h264_level_idc = 0x1f;
 AVCodec *avcodec_h264enc;             /* optional; specified H.264 encoder */
 AVCodec *avcodec_h264dec;             /* optional; specified H.264 decoder */
+AVCodec *h265_encoder;
+AVCodec *h265_decoder;
 
 
 #if LIBAVUTIL_VERSION_MAJOR >= 56
@@ -183,6 +185,8 @@ static int module_init(void)
 	struct list *vidcodecl = baresip_vidcodecl();
 	char h264enc[64] = "libx264";
 	char h264dec[64] = "h264";
+	char h265enc[64] = "libx265";
+	char h265dec[64] = "hevc";
 #if LIBAVUTIL_VERSION_MAJOR >= 56
 	char hwaccel[64];
 #endif
@@ -197,6 +201,8 @@ static int module_init(void)
 
 	conf_get_str(conf_cur(), "avcodec_h264enc", h264enc, sizeof(h264enc));
 	conf_get_str(conf_cur(), "avcodec_h264dec", h264dec, sizeof(h264dec));
+	conf_get_str(conf_cur(), "h265_encoder", h265enc, sizeof(h265enc));
+	conf_get_str(conf_cur(), "h265_decoder", h265dec, sizeof(h265dec));
 
 	avcodec_h264enc = avcodec_find_encoder_by_name(h264enc);
 	if (!avcodec_h264enc) {
@@ -206,6 +212,16 @@ static int module_init(void)
 	avcodec_h264dec = avcodec_find_decoder_by_name(h264dec);
 	if (!avcodec_h264dec) {
 		warning("avcodec: h264 decoder not found (%s)\n", h264dec);
+	}
+
+	h265_encoder = avcodec_find_encoder_by_name(h265enc);
+	if (!h265_encoder) {
+		warning("h265: encoder not found (%s)\n", h265enc);
+	}
+
+	h265_decoder = avcodec_find_decoder_by_name(h265dec);
+	if (!h265_decoder) {
+		warning("h265: decoder not found (%s)\n", h265dec);
 	}
 
 	if (avcodec_h264enc || avcodec_h264dec) {
@@ -219,7 +235,7 @@ static int module_init(void)
 	if (avcodec_find_decoder(AV_CODEC_ID_MPEG4))
 		vidcodec_register(vidcodecl, &mpg4);
 
-	if (avcodec_find_decoder(AV_CODEC_ID_H265))
+	if (h265_encoder || h265_decoder)
 		vidcodec_register(vidcodecl, &h265);
 
 	if (avcodec_h264enc) {
@@ -229,6 +245,15 @@ static int module_init(void)
 	if (avcodec_h264dec) {
 		info("avcodec: using H.264 decoder '%s' -- %s\n",
 		     avcodec_h264dec->name, avcodec_h264dec->long_name);
+	}
+
+	if (h265_encoder) {
+		info("h265: using encoder '%s' -- %s\n",
+		     h265_encoder->name, h265_encoder->long_name);
+	}
+	if (h265_decoder) {
+		info("h265: using decoder '%s' -- %s\n",
+		     h265_decoder->name, h265_decoder->long_name);
 	}
 
 #if LIBAVUTIL_VERSION_MAJOR >= 56

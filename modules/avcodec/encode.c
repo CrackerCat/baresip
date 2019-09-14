@@ -175,6 +175,15 @@ static int init_encoder(struct videnc_state *st)
 		return 0;
 	}
 
+	if (st->codec_id == AV_CODEC_ID_H265 && h265_encoder) {
+
+		st->codec = h265_encoder;
+
+		info("avcodec: h265 encoder activated\n");
+
+		return 0;
+	}
+
 	st->codec = avcodec_find_encoder(st->codec_id);
 	if (!st->codec)
 		return ENOENT;
