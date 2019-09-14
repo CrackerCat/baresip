@@ -119,6 +119,10 @@ static int init_decoder(struct viddec_state *st, const char *name)
 		st->codec = avcodec_h264dec;
 		info("avcodec: h264 decoder activated\n");
 	}
+	else if (codec_id == AV_CODEC_ID_H265 && h265_decoder) {
+		st->codec = h265_decoder;
+		info("avcodec: h265 decoder activated\n");
+	}
 	else {
 		st->codec = avcodec_find_decoder(codec_id);
 		if (!st->codec)

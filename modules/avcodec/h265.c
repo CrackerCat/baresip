@@ -1,5 +1,5 @@
 /**
- * @file h265/fmt.c H.265 Video Codec -- protocol format
+ * @file h265.c H.265 Video Codec -- protocol format
  *
  * Copyright (C) 2010 Creytiv.com
  */
