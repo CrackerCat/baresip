@@ -280,6 +280,13 @@ static int open_encoder(struct videnc_state *st,
 		}
 	}
 
+	if (0 == str_cmp(h265_encoder->name, "libx265")) {
+
+		av_opt_set(st->ctx->priv_data, "profile", "main444-8", 0);
+		av_opt_set(st->ctx->priv_data, "preset", "ultrafast", 0);
+		av_opt_set(st->ctx->priv_data, "tune", "zerolatency", 0);
+	}
+
 #if LIBAVUTIL_VERSION_MAJOR >= 56
 	if (avcodec_hw_type == AV_HWDEVICE_TYPE_VAAPI) {
 
